@@ -383,7 +383,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           { role: "user", content: emailSummary },
         ],
         response_format: { type: "json_object" },
-        max_tokens: 4000,
+        max_completion_tokens: 4000,
       });
 
       const content = completion.choices[0]?.message?.content || "{}";

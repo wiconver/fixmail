@@ -1,59 +1,89 @@
-# FixMail – Limpiador inteligente de Gmail con IA
+# FixMail — Gmail Cleaner con IA
 
-## Overview
-FixMail is a full-stack web application that helps users clean their Gmail inbox using AI (GPT) classification. Built with React + TypeScript frontend and Express.js backend.
+Aplicación web full-stack para limpiar Gmail con clasificación por Inteligencia Artificial (GPT). UI completamente en español.
 
-## Features
-- **Google OAuth2 authentication** – Secure Gmail access via authorization code flow
-- **Dashboard** – Email category chart (Recharts pie chart), metrics, quick actions
-- **AI Analysis** – GPT-5-mini classifies emails into: IMPORTANTE, SUSCRIPCION_ACTIVA, NEWSLETTER_INACTIVA, PROMOCION_UTIL, PROMOCION_SPAM with score 0–10
-- **Quick actions** – Delete all Promotions from today, delete by sender, empty trash
-- **Search & Delete** – Search emails by text/date range, select and bulk delete
-- **Freemium model** – 50 actions/month (stored in PostgreSQL), Pro unlock with code FIXPRO
-- **Action logs** – All deletion/analysis actions timestamped in database
+## Stack
 
-## Architecture
+- **Frontend**: React + TypeScript + Vite + TailwindCSS + shadcn/ui
+- **Backend**: Express.js (Node.js)
+- **Base de datos**: PostgreSQL con Drizzle ORM
+- **IA**: OpenAI GPT (vía integración Replit AI — no requiere API key propia)
+- **Auth**: Google OAuth2 (opcional — modo demo activo sin credenciales)
+- **Gráficos**: Recharts
 
-### Frontend (`client/src/`)
-- `App.tsx` – Auth check, routing, sidebar layout
-- `pages/Login.tsx` – Login page + setup instructions for Google OAuth
-- `pages/Dashboard.tsx` – Main dashboard with chart, metrics, quick actions, logs
-- `pages/Analysis.tsx` – AI analysis with category filtering and email selection
-- `pages/Search.tsx` – Email search by text/date with bulk delete
-- `components/app-sidebar.tsx` – Sidebar with user info, freemium counter, navigation
+## Arquitectura
 
-### Backend (`server/`)
-- `routes.ts` – All API routes (auth, emails, AI analysis, freemium)
-- `storage.ts` – PostgreSQL storage for freemium usage and action logs
-- `db.ts` – Drizzle ORM database connection
+```
+client/src/
+  pages/
+    Dashboard.tsx   — Métricas, acciones rápidas, registro de acciones
+    Analysis.tsx    — Clasificación IA de correos
+    Search.tsx      — Búsqueda y borrado manual por filtros
+    Login.tsx       — Pantalla de configuración OAuth (solo sin credenciales)
+  components/
+    app-sidebar.tsx — Navegación, usuario, contador freemium, código Pro
+  lib/
+    queryClient.ts  — TanStack Query + fetcher
+    apiError.ts     — Parser de errores de API
 
-### Shared (`shared/`)
-- `schema.ts` – Drizzle schema: users, freemium_usage, action_logs
+server/
+  routes.ts         — Todas las rutas API (auth, emails, IA, freemium, logs)
+  mock-emails.ts    — 30 correos de demo + operaciones en memoria
+  storage.ts        — Interfaz PostgreSQL (freemium_usage, action_logs)
+  index.ts          — Punto de entrada Express
 
-## Required Secrets
-Users must configure these secrets in Replit:
+shared/
+  schema.ts         — Esquema Drizzle + tipos compartidos
+```
 
-| Secret | Value |
-|--------|-------|
-| `GOOGLE_CLIENT_ID` | OAuth 2.0 Client ID from Google Cloud Console |
-| `GOOGLE_CLIENT_SECRET` | OAuth 2.0 Client Secret |
-| `SESSION_SECRET` | Any random string (auto-configured) |
+## Modo Demo
 
-OpenAI is provided via Replit AI Integrations (no user API key needed).
+La app detecta automáticamente si faltan `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` y activa modo demo:
+- Auto-autenticación como `demo@fixmail.app` / "Usuario Demo"
+- 30 correos de ejemplo (Amazon, Netflix, GitHub, LinkedIn, Spotify, etc.)
+- Análisis IA con OpenAI real sobre datos mock
+- Borrado actualiza estado en memoria
+- Badge "Demo" en sidebar + banner en Dashboard
 
-## Google OAuth Setup
-1. Go to https://console.cloud.google.com/apis/credentials
-2. Create "Web application" OAuth client
-3. Add authorized redirect URI: `https://<your-repl>.replit.app/api/auth/callback`
-4. Enable Gmail API at https://console.cloud.google.com/apis/library/gmail.googleapis.com
-5. Required scopes: `https://mail.google.com/`, `userinfo.email`, `userinfo.profile`
+## Rutas API
 
-## Tech Stack
-- **Frontend**: React, TypeScript, Tailwind CSS, shadcn/ui, Recharts, TanStack Query, Wouter
-- **Backend**: Express.js, Node.js, googleapis
-- **Database**: PostgreSQL (Drizzle ORM)
-- **AI**: OpenAI GPT-5-mini via Replit AI Integrations
-- **Auth**: Google OAuth2 + express-session
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/api/auth/status` | Estado de sesión |
+| GET | `/api/auth/url` | URL de OAuth de Google |
+| GET | `/api/auth/callback` | Callback OAuth |
+| POST | `/api/auth/logout` | Cerrar sesión |
+| POST | `/api/auth/promo` | Activar código Pro |
+| GET | `/api/freemium/usage` | Contador de acciones |
+| GET | `/api/logs` | Historial de acciones |
+| GET | `/api/emails/stats` | Estadísticas por categoría |
+| GET | `/api/emails/search` | Buscar correos |
+| POST | `/api/emails/analyze` | Análisis IA de bandeja |
+| POST | `/api/emails/delete-bulk` | Borrado en lote por IDs |
+| POST | `/api/emails/delete-promotions-today` | Borrar Promotions del día |
+| POST | `/api/emails/delete-by-sender` | Borrar por remitente |
+| POST | `/api/emails/empty-trash` | Vaciar papelera |
 
-## Note on Google Integration
-The Replit Gmail integration was dismissed by the user. The app instead uses direct Google OAuth2 credentials stored as secrets (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET). Do not attempt to re-add the Replit Gmail connector.
+## Freemium
+
+- **Gratis**: 50 acciones/mes (contadas en PostgreSQL por email + mes)
+- **Pro**: código `FIXPRO` → acciones ilimitadas en sesión actual
+
+## Secrets necesarios
+
+| Secret | Requerido | Descripción |
+|--------|-----------|-------------|
+| `SESSION_SECRET` | Sí | Secreto para sesiones Express |
+| `DATABASE_URL` | Sí | PostgreSQL (auto-configurado por Replit) |
+| `AI_INTEGRATIONS_OPENAI_API_KEY` | Sí | Auto-configurado por integración Replit IA |
+| `AI_INTEGRATIONS_OPENAI_BASE_URL` | Sí | Auto-configurado por integración Replit IA |
+| `GOOGLE_CLIENT_ID` | No (activa demo sin él) | OAuth Google Cloud |
+| `GOOGLE_CLIENT_SECRET` | No (activa demo sin él) | OAuth Google Cloud |
+
+## Comandos
+
+```bash
+npm run dev      # Desarrollo (Express + Vite en puerto 5000)
+npm run db:push  # Sincronizar esquema con PostgreSQL
+npm run build    # Build de producción
+```
