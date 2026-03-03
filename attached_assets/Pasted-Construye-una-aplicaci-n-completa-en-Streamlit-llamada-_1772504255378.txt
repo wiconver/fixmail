@@ -1,0 +1,80 @@
+Construye una aplicación completa en Streamlit llamada "FixMail" – un limpiador inteligente de Gmail con IA. Quiero que lo hagas TODO de una vez, sin pausar ni preguntarme nada más. Implementa exactamente lo siguiente (no agregues ni quites funcionalidades sin que yo lo pida después):
+
+Tecnologías obligatorias:
+- Python + Streamlit (versión más reciente)
+- Gmail API vía google-auth-oauthlib y google-api-python-client
+- OpenAI API (usar modelo gpt-4o-mini para análisis)
+- SQLite para guardar límites freemium y logs
+- Plotly para gráficos interactivos
+- pandas para manejar datos de correos
+
+Funcionalidades completas (implementa todas):
+
+1. Autenticación OAuth2 completa:
+   - Flujo Web Application (authorization code + refresh token)
+   - Guarda tokens en st.session_state
+   - Renovación automática de access token
+   - Botón de logout que borra la sesión
+   - Si no hay credenciales en secrets, muestra instrucciones detalladas paso a paso para crear OAuth Client en Google Cloud Console (incluye enlaces directos a https://console.cloud.google.com/apis/credentials y scopes necesarios: https://mail.google.com/)
+
+2. Secrets requeridos (menciona al final cuáles debe poner el usuario):
+   - CLIENT_ID
+   - CLIENT_SECRET
+   - REDIRECT_URI = https://<repl-name>.replit.app/oauth2callback
+   - OPENAI_API_KEY
+
+3. Dashboard principal (después del login):
+   - Título grande: "FixMail – Limpia tu Gmail con IA"
+   - Sidebar con: nombre del usuario (obtenido de profile), uso de almacenamiento actual (quotaUsageInBytes / quotaLimitInBytes), barra de progreso + color rojo si >80%
+   - Gráfico Plotly de pastel o barras: cantidad de correos por categoría Gmail (Primary, Promotions, Social, Updates, Forums, [otros])
+   - Tarjetas con métricas: Total correos, Promotions hoy, Promedio diario, Espacio usado por Promotions
+
+4. Limpieza con IA:
+   - Botón grande "Analizar inbox con IA (GPT-4o-mini)"
+     - Al clickear: consulta últimos 100-200 correos (o lo que permita rate limit), envía resumen batch a OpenAI con prompt optimizado para clasificar:
+       - Suscripciones activas vs inactivas
+       - Promociones útiles vs spam
+       - Newsletters que ya no lees
+       - Posibles correos importantes que NO borrar
+     - Muestra resultados en tabla o tarjetas con checkboxes para seleccionar qué borrar
+   - Botones rápidos:
+     - "Borrar TODAS las Promotions de HOY" → confirmación doble + log
+     - "Borrar por remitente" → input texto (ej: amazon.com, netflix.com), busca y borrea en lote con confirmación
+     - "Vaciar papelera ahora"
+
+5. Búsqueda y borrado manual:
+   - Input de búsqueda: texto + rango de fechas (desde-hasta)
+   - Lista de correos con: remitente, asunto, fecha, snippet, categoría, tamaño aproximado
+   - Checkboxes para seleccionar múltiples → botón "Borrar seleccionados" con confirmación
+
+6. Modelo Freemium:
+   - Límite gratis: 50 acciones/mes (cada borrado en lote o análisis IA cuenta como 1 acción)
+   - Tabla SQLite: user_id (email), mes_año, contador_acciones
+   - Si supera límite → muestra mensaje "Has alcanzado el límite gratis. Usa código FIXPRO para desbloquear Pro ilimitado este mes" (solo demo, al poner FIXPRO quita límite)
+   - Muestra contador actual en sidebar: "Acciones restantes este mes: X/50"
+
+7. Diseño visual Gmail-like:
+   - Fuente: Roboto (importar de Google Fonts)
+   - Colores Google: primary #4285F4, red #EA4335, green #34A853, yellow #FBBC05
+   - Tarjetas con shadow, border-radius 12px
+   - Sidebar limpio con íconos
+   - Modo claro por defecto (opcional dark mode toggle después)
+
+8. Extras obligatorios:
+   - Expander "Registro de acciones" con log timestamp + descripción (ej: "Borradas 45 Promotions el 2026-03-03")
+   - Manejo de errores: rate limits (esperar + retry), auth expirada (redirigir a login), cuota Gmail excedida
+   - Spinner/loading mientras consulta Gmail o OpenAI
+   - Responsive en móvil
+
+9. Prompt IA optimizado (usa este texto exacto cuando llames a OpenAI):
+   "Eres un experto limpiador de Gmail. Analiza estos correos resumidos y clasifícalos en: 
+   - IMPORTANTE: no borrar nunca
+   - SUSCRIPCION_ACTIVA: vale la pena mantener
+   - NEWSLETTER_INACTIVA: no se abre desde hace meses
+   - PROMOCION_UTIL: ofertas interesantes
+   - PROMOCION_SPAM: borrar sin dudar
+   Para cada correo da: categoría + razón corta (máx 15 palabras) + score_borrar (0-10)"
+
+Implementa TODO esto de una sola vez. No me preguntes nada, no hagas versiones parciales, no esperes confirmación. Si necesitas secrets avísame solo al final con la lista exacta. Una vez terminado, ejecuta la app, muestra logs limpios y actualiza README.md con instrucciones claras de uso y configuración.
+
+Empieza YA.
