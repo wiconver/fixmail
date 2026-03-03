@@ -21,6 +21,7 @@ export interface AuthStatus {
   userName?: string;
   userPicture?: string;
   isPro?: boolean;
+  isDemo?: boolean;
 }
 
 function AppContent() {

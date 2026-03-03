@@ -5,6 +5,15 @@ import MemoryStore from "memorystore";
 import { google } from "googleapis";
 import OpenAI from "openai";
 import { storage } from "./storage";
+import {
+  isDemo,
+  getMockEmails,
+  getMockStats,
+  searchMockEmails,
+  deleteMockEmails,
+  deleteMockPromotionsToday,
+  deleteMockBySender,
+} from "./mock-emails";
 
 const MemStore = MemoryStore(session);
 
@@ -16,6 +25,8 @@ const GMAIL_SCOPES = [
 
 const FREEMIUM_LIMIT = 50;
 const PRO_CODE = "FIXPRO";
+const DEMO_EMAIL = "demo@fixmail.app";
+const DEMO_NAME = "Usuario Demo";
 
 function getCurrentMonthYear(): string {
   const now = new Date();
@@ -43,6 +54,7 @@ declare module "express-session" {
     userName?: string;
     userPicture?: string;
     isPro?: boolean;
+    isDemo?: boolean;
   }
 }
 
@@ -57,11 +69,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     })
   );
 
+  // ── DEMO AUTO-LOGIN ─────────────────────────────────────────────────────────
+  // Auto-authenticate as demo user when no Google credentials are configured
+
+  app.use((req, res, next) => {
+    if (isDemo() && !req.session.userEmail && req.path.startsWith("/api/") && req.path !== "/api/auth/status" && req.path !== "/api/auth/url") {
+      req.session.userEmail = DEMO_EMAIL;
+      req.session.userName = DEMO_NAME;
+      req.session.userPicture = "";
+      req.session.isDemo = true;
+      req.session.isPro = false;
+    }
+    next();
+  });
+
   // ── AUTH ────────────────────────────────────────────────────────────────────
 
   app.get("/api/auth/url", (req: Request, res: Response) => {
-    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-      return res.status(503).json({ error: "no_credentials", message: "Google credentials not configured" });
+    if (isDemo()) {
+      return res.json({ demo: true, message: "Demo mode active" });
     }
     const oauth2Client = getOAuth2Client(getRedirectUri(req));
     const url = oauth2Client.generateAuthUrl({
@@ -87,6 +113,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       req.session.userEmail = profile.email || "";
       req.session.userName = profile.name || profile.email || "";
       req.session.userPicture = profile.picture || "";
+      req.session.isDemo = false;
       req.session.isPro = false;
 
       res.redirect("/?auth=success");
@@ -97,9 +124,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/api/auth/status", (req: Request, res: Response) => {
+    if (isDemo()) {
+      return res.json({
+        authenticated: true,
+        userEmail: DEMO_EMAIL,
+        userName: DEMO_NAME,
+        userPicture: "",
+        isPro: req.session.isPro || false,
+        isDemo: true,
+      });
+    }
     if (!req.session.tokens) {
-      const hasCredentials = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
-      return res.json({ authenticated: false, hasCredentials });
+      return res.json({ authenticated: false, hasCredentials: true });
     }
     res.json({
       authenticated: true,
@@ -107,6 +143,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       userName: req.session.userName,
       userPicture: req.session.userPicture,
       isPro: req.session.isPro || false,
+      isDemo: false,
     });
   });
 
@@ -128,10 +165,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── FREEMIUM ────────────────────────────────────────────────────────────────
 
   app.get("/api/freemium/usage", async (req: Request, res: Response) => {
-    if (!req.session.userEmail) return res.status(401).json({ error: "Not authenticated" });
+    const userEmail = req.session.userEmail || (isDemo() ? DEMO_EMAIL : null);
+    if (!userEmail) return res.status(401).json({ error: "Not authenticated" });
     try {
       const monthYear = getCurrentMonthYear();
-      const usage = await storage.getFreemiumUsage(req.session.userEmail, monthYear);
+      const usage = await storage.getFreemiumUsage(userEmail, monthYear);
       res.json({
         used: usage?.actionCount || 0,
         limit: FREEMIUM_LIMIT,
@@ -146,16 +184,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── ACTION LOGS ─────────────────────────────────────────────────────────────
 
   app.get("/api/logs", async (req: Request, res: Response) => {
-    if (!req.session.userEmail) return res.status(401).json({ error: "Not authenticated" });
+    const userEmail = req.session.userEmail || (isDemo() ? DEMO_EMAIL : null);
+    if (!userEmail) return res.status(401).json({ error: "Not authenticated" });
     try {
-      const logs = await storage.getActionLogs(req.session.userEmail);
+      const logs = await storage.getActionLogs(userEmail);
       res.json(logs);
     } catch (err) {
       res.status(500).json({ error: "Failed to get logs" });
     }
   });
 
-  // ── GMAIL HELPERS ───────────────────────────────────────────────────────────
+  // ── HELPERS ──────────────────────────────────────────────────────────────────
 
   function getAuthenticatedClient(req: Request) {
     if (!req.session.tokens) throw new Error("Not authenticated");
@@ -164,9 +203,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     return { oauth2Client, gmail: google.gmail({ version: "v1", auth: oauth2Client }) };
   }
 
+  function getUserEmail(req: Request): string {
+    return req.session.userEmail || (isDemo() ? DEMO_EMAIL : "");
+  }
+
   async function checkAndIncrementAction(req: Request): Promise<{ allowed: boolean; message?: string }> {
     if (req.session.isPro) return { allowed: true };
-    const userEmail = req.session.userEmail!;
+    const userEmail = getUserEmail(req);
     const monthYear = getCurrentMonthYear();
     const usage = await storage.getFreemiumUsage(userEmail, monthYear);
     const current = usage?.actionCount || 0;
@@ -181,20 +224,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   }
 
   async function logAction(req: Request, actionType: string, description: string) {
-    if (!req.session.userEmail) return;
-    await storage.addActionLog({
-      userEmail: req.session.userEmail,
-      actionType,
-      description,
-    });
+    const userEmail = getUserEmail(req);
+    if (!userEmail) return;
+    await storage.addActionLog({ userEmail, actionType, description });
   }
 
   // ── EMAIL STATS ─────────────────────────────────────────────────────────────
 
   app.get("/api/emails/stats", async (req: Request, res: Response) => {
     try {
+      if (isDemo()) {
+        return res.json(getMockStats());
+      }
       const { gmail } = getAuthenticatedClient(req);
-
       const categories = [
         { label: "Primary", query: "category:primary" },
         { label: "Promotions", query: "category:promotions" },
@@ -202,22 +244,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         { label: "Updates", query: "category:updates" },
         { label: "Forums", query: "category:forums" },
       ];
-
       const counts = await Promise.all(
         categories.map(async (cat) => {
           const r = await gmail.users.messages.list({ userId: "me", q: cat.query, maxResults: 1 });
           return { label: cat.label, count: r.data.resultSizeEstimate || 0 };
         })
       );
-
       const profileRes = await gmail.users.getProfile({ userId: "me" });
       const profile = profileRes.data;
-
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
       const todayQuery = `category:promotions after:${Math.floor(todayStart.getTime() / 1000)}`;
       const todayRes = await gmail.users.messages.list({ userId: "me", q: todayQuery, maxResults: 1 });
-
       res.json({
         categories: counts,
         totalMessages: profile.messagesTotal || 0,
@@ -234,9 +272,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/emails/search", async (req: Request, res: Response) => {
     try {
-      const { gmail } = getAuthenticatedClient(req);
       const { q = "", after, before, maxResults = "30" } = req.query as Record<string, string>;
 
+      if (isDemo()) {
+        const results = searchMockEmails({ q, after, before });
+        return res.json(results.slice(0, parseInt(maxResults)));
+      }
+
+      const { gmail } = getAuthenticatedClient(req);
       let query = q;
       if (after) query += ` after:${after}`;
       if (before) query += ` before:${before}`;
@@ -286,37 +329,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const check = await checkAndIncrementAction(req);
       if (!check.allowed) return res.status(429).json({ error: check.message });
 
-      const { gmail } = getAuthenticatedClient(req);
+      let messages: any[] = [];
 
-      const listRes = await gmail.users.messages.list({
-        userId: "me",
-        q: "in:inbox",
-        maxResults: 100,
-      });
-
-      const messageIds = listRes.data.messages || [];
-      if (messageIds.length === 0) return res.json([]);
-
-      const sample = messageIds.slice(0, 50);
-      const messages = await Promise.all(
-        sample.map(async (msg) => {
-          const detail = await gmail.users.messages.get({
-            userId: "me",
-            id: msg.id!,
-            format: "metadata",
-            metadataHeaders: ["From", "Subject", "Date"],
-          });
-          const headers = detail.data.payload?.headers || [];
-          const get = (name: string) => headers.find((h) => h.name === name)?.value || "";
-          return {
-            id: msg.id,
-            from: get("From"),
-            subject: get("Subject"),
-            date: get("Date"),
-            snippet: detail.data.snippet || "",
-          };
-        })
-      );
+      if (isDemo()) {
+        messages = getMockEmails().slice(0, 30).map((e) => ({
+          id: e.id,
+          from: e.from,
+          subject: e.subject,
+          date: e.date,
+          snippet: e.snippet,
+        }));
+      } else {
+        const { gmail } = getAuthenticatedClient(req);
+        const listRes = await gmail.users.messages.list({ userId: "me", q: "in:inbox", maxResults: 50 });
+        const messageIds = listRes.data.messages || [];
+        messages = await Promise.all(
+          messageIds.slice(0, 30).map(async (msg) => {
+            const detail = await gmail.users.messages.get({
+              userId: "me", id: msg.id!, format: "metadata",
+              metadataHeaders: ["From", "Subject", "Date"],
+            });
+            const headers = detail.data.payload?.headers || [];
+            const get = (name: string) => headers.find((h) => h.name === name)?.value || "";
+            return { id: msg.id, from: get("From"), subject: get("Subject"), date: get("Date"), snippet: detail.data.snippet || "" };
+          })
+        );
+      }
 
       const openai = new OpenAI({
         apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -324,7 +362,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
 
       const emailSummary = messages
-        .map((m, i) => `${i + 1}. De: ${m.from} | Asunto: ${m.subject} | Fecha: ${m.date} | Preview: ${m.snippet?.substring(0, 80)}`)
+        .map((m, i) => `${i + 1}. De: ${m.from} | Asunto: ${m.subject} | Fecha: ${new Date(m.date).toLocaleDateString("es-ES")} | Preview: ${(m.snippet || "").substring(0, 80)}`)
         .join("\n");
 
       const completion = await openai.chat.completions.create({
@@ -340,7 +378,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
    - PROMOCION_SPAM: borrar sin dudar
    Para cada correo da: categoría + razón corta (máx 15 palabras) + score_borrar (0-10)
    
-   Responde SOLO con JSON array: [{"index": 1, "categoria": "...", "razon": "...", "score_borrar": 5}]`,
+   Responde SOLO con JSON: {"results": [{"index": 1, "categoria": "...", "razon": "...", "score_borrar": 5}]}`,
           },
           { role: "user", content: emailSummary },
         ],
@@ -350,17 +388,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const content = completion.choices[0]?.message?.content || "{}";
       let parsed: any = {};
-      try {
-        parsed = JSON.parse(content);
-      } catch {}
-      const results = parsed.results || parsed.emails || parsed.correos || (Array.isArray(parsed) ? parsed : []);
+      try { parsed = JSON.parse(content); } catch {}
+      const rawResults = parsed.results || parsed.emails || (Array.isArray(parsed) ? parsed : []);
 
-      const enriched = results.map((r: any) => ({
-        ...messages[r.index - 1],
-        categoria: r.categoria,
-        razon: r.razon,
-        score_borrar: r.score_borrar,
-      })).filter((r: any) => r.id);
+      const enriched = rawResults
+        .map((r: any) => {
+          const email = messages[r.index - 1];
+          if (!email) return null;
+          return { ...email, categoria: r.categoria, razon: r.razon, score_borrar: r.score_borrar };
+        })
+        .filter(Boolean);
 
       await logAction(req, "ai_analysis", `Análisis IA de ${enriched.length} correos el ${new Date().toLocaleDateString("es-ES")}`);
 
@@ -381,12 +418,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { ids } = req.body as { ids: string[] };
       if (!ids || ids.length === 0) return res.status(400).json({ error: "No IDs provided" });
 
+      if (isDemo()) {
+        const deleted = deleteMockEmails(ids);
+        await logAction(req, "bulk_delete", `[Demo] Eliminados ${deleted} correos el ${new Date().toLocaleDateString("es-ES")}`);
+        return res.json({ success: true, deleted });
+      }
+
       const { gmail } = getAuthenticatedClient(req);
-
       await gmail.users.messages.batchDelete({ userId: "me", requestBody: { ids } });
-
       await logAction(req, "bulk_delete", `Eliminados ${ids.length} correos el ${new Date().toLocaleDateString("es-ES")}`);
-
       res.json({ success: true, deleted: ids.length });
     } catch (err: any) {
       console.error("Bulk delete error:", err);
@@ -401,27 +441,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const check = await checkAndIncrementAction(req);
       if (!check.allowed) return res.status(429).json({ error: check.message });
 
-      const { gmail } = getAuthenticatedClient(req);
+      if (isDemo()) {
+        const deleted = deleteMockPromotionsToday();
+        await logAction(req, "delete_promotions", `[Demo] Borradas ${deleted} Promotions el ${new Date().toLocaleDateString("es-ES")}`);
+        return res.json({ success: true, deleted });
+      }
 
+      const { gmail } = getAuthenticatedClient(req);
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
       const afterTs = Math.floor(todayStart.getTime() / 1000);
-
-      const listRes = await gmail.users.messages.list({
-        userId: "me",
-        q: `category:promotions after:${afterTs}`,
-        maxResults: 500,
-      });
-
+      const listRes = await gmail.users.messages.list({ userId: "me", q: `category:promotions after:${afterTs}`, maxResults: 500 });
       const ids = (listRes.data.messages || []).map((m) => m.id!).filter(Boolean);
       if (ids.length === 0) return res.json({ success: true, deleted: 0 });
-
       for (let i = 0; i < ids.length; i += 1000) {
         await gmail.users.messages.batchDelete({ userId: "me", requestBody: { ids: ids.slice(i, i + 1000) } });
       }
-
       await logAction(req, "delete_promotions", `Borradas ${ids.length} Promotions el ${new Date().toLocaleDateString("es-ES")}`);
-
       res.json({ success: true, deleted: ids.length });
     } catch (err: any) {
       console.error("Delete promotions error:", err);
@@ -439,23 +475,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { sender } = req.body as { sender: string };
       if (!sender) return res.status(400).json({ error: "Sender required" });
 
+      if (isDemo()) {
+        const deleted = deleteMockBySender(sender);
+        await logAction(req, "delete_by_sender", `[Demo] Borrados ${deleted} correos de ${sender} el ${new Date().toLocaleDateString("es-ES")}`);
+        return res.json({ success: true, deleted });
+      }
+
       const { gmail } = getAuthenticatedClient(req);
-
-      const listRes = await gmail.users.messages.list({
-        userId: "me",
-        q: `from:${sender}`,
-        maxResults: 500,
-      });
-
+      const listRes = await gmail.users.messages.list({ userId: "me", q: `from:${sender}`, maxResults: 500 });
       const ids = (listRes.data.messages || []).map((m) => m.id!).filter(Boolean);
       if (ids.length === 0) return res.json({ success: true, deleted: 0 });
-
       for (let i = 0; i < ids.length; i += 1000) {
         await gmail.users.messages.batchDelete({ userId: "me", requestBody: { ids: ids.slice(i, i + 1000) } });
       }
-
       await logAction(req, "delete_by_sender", `Borrados ${ids.length} correos de ${sender} el ${new Date().toLocaleDateString("es-ES")}`);
-
       res.json({ success: true, deleted: ids.length });
     } catch (err: any) {
       console.error("Delete by sender error:", err);
@@ -470,23 +503,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const check = await checkAndIncrementAction(req);
       if (!check.allowed) return res.status(429).json({ error: check.message });
 
+      if (isDemo()) {
+        await logAction(req, "empty_trash", `[Demo] Papelera vaciada el ${new Date().toLocaleDateString("es-ES")}`);
+        return res.json({ success: true, deleted: 0 });
+      }
+
       const { gmail } = getAuthenticatedClient(req);
-
-      const listRes = await gmail.users.messages.list({
-        userId: "me",
-        q: "in:trash",
-        maxResults: 500,
-      });
-
+      const listRes = await gmail.users.messages.list({ userId: "me", q: "in:trash", maxResults: 500 });
       const ids = (listRes.data.messages || []).map((m) => m.id!).filter(Boolean);
       if (ids.length > 0) {
         for (let i = 0; i < ids.length; i += 1000) {
           await gmail.users.messages.batchDelete({ userId: "me", requestBody: { ids: ids.slice(i, i + 1000) } });
         }
       }
-
       await logAction(req, "empty_trash", `Papelera vaciada (${ids.length} correos) el ${new Date().toLocaleDateString("es-ES")}`);
-
       res.json({ success: true, deleted: ids.length });
     } catch (err: any) {
       console.error("Empty trash error:", err);

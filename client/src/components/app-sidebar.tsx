@@ -12,7 +12,7 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar";
 import { useQuery } from "@tanstack/react-query";
-import { LayoutDashboard, Sparkles, Search, LogOut, Shield, Mail } from "lucide-react";
+import { LayoutDashboard, Sparkles, Search, LogOut, Shield, Mail, FlaskConical } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -129,9 +129,17 @@ export function AppSidebar({ auth, onLogout }: AppSidebarProps) {
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-sidebar-foreground truncate" data-testid="text-username">
-                    {auth.userName || auth.userEmail}
-                  </p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-medium text-sidebar-foreground truncate" data-testid="text-username">
+                      {auth.userName || auth.userEmail}
+                    </p>
+                    {auth.isDemo && (
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-chart-3/40 text-chart-3 gap-1 shrink-0">
+                        <FlaskConical className="w-2.5 h-2.5" />
+                        Demo
+                      </Badge>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground truncate">{auth.userEmail}</p>
                 </div>
               </div>

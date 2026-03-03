@@ -78,6 +78,11 @@ export default function Dashboard() {
   const [confirmType, setConfirmType] = useState<"promotions" | "sender" | "trash" | null>(null);
   const [showLogs, setShowLogs] = useState(false);
 
+  const { data: auth } = useQuery<{ isDemo?: boolean }>({
+    queryKey: ["/api/auth/status"],
+  });
+  const isDemoMode = auth?.isDemo;
+
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useQuery<EmailStats>({
     queryKey: ["/api/emails/stats"],
   });
@@ -160,6 +165,19 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
+      {isDemoMode && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-chart-3/10 border border-chart-3/20" data-testid="banner-demo">
+          <div className="w-2 h-2 rounded-full bg-chart-3 mt-1.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-foreground">Modo demostración activo</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Estás viendo datos de ejemplo. Para conectar tu Gmail real, añade las secrets{" "}
+              <code className="bg-muted px-1 rounded">GOOGLE_CLIENT_ID</code> y{" "}
+              <code className="bg-muted px-1 rounded">GOOGLE_CLIENT_SECRET</code> en los ajustes de Replit. El análisis IA funciona con datos reales de OpenAI.
+            </p>
+          </div>
+        </div>
+      )}
       <div>
         <h1 className="text-2xl font-bold text-foreground">FixMail – Limpia tu Gmail con IA</h1>
         <p className="text-muted-foreground text-sm mt-1">Vista general de tu bandeja de entrada</p>
